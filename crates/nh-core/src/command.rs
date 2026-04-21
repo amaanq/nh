@@ -2,6 +2,7 @@ use std::{
   collections::HashMap,
   convert::Infallible,
   ffi::{OsStr, OsString},
+  io::{Read, Write},
   path::PathBuf,
   str::FromStr,
   sync::{Mutex, OnceLock},
@@ -18,6 +19,91 @@ use tracing::{debug, info, warn};
 use which::which;
 
 use crate::{args::NixBuildPassthroughArgs, installable::Installable};
+
+/// Execute a command, streaming output to stdout/stderr while also capturing
+/// it for error reporting.
+///
+/// # Returns
+///
+/// Returns the exit status and captured stdout/stderr, or an error.
+///
+/// # Errors
+///
+/// Returns an error if:
+///
+/// - The command fails to start
+/// - stdout or stderr cannot be captured
+/// - The command fails to complete
+/// - Either output thread panics
+pub fn exec_with_streaming(
+  cmd: Exec,
+) -> Result<(subprocess::ExitStatus, String, String)> {
+  let mut job = cmd
+    .stdout(Redirection::Pipe)
+    .stderr(Redirection::Pipe)
+    .start()
+    .wrap_err("Failed to start command")?;
+
+  let stdout_pipe = job
+    .stdout
+    .take()
+    .ok_or_else(|| eyre::eyre!("Failed to capture stdout"))?;
+  let stderr_pipe = job
+    .stderr
+    .take()
+    .ok_or_else(|| eyre::eyre!("Failed to capture stderr"))?;
+
+  let stdout_thread = std::thread::spawn(move || {
+    let mut stdout_reader = std::io::BufReader::new(stdout_pipe);
+    let mut stdout_output = String::new();
+    let mut stdout_buf = [0u8; 4096];
+
+    loop {
+      match stdout_reader.read(&mut stdout_buf) {
+        Ok(0) | Err(_) => break,
+        Ok(n) => {
+          let _ = std::io::stdout().write_all(&stdout_buf[..n]);
+          let _ = std::io::stdout().flush();
+          stdout_output.push_str(&String::from_utf8_lossy(&stdout_buf[..n]));
+        },
+      }
+    }
+
+    stdout_output
+  });
+
+  let stderr_thread = std::thread::spawn(move || {
+    let mut stderr_reader = std::io::BufReader::new(stderr_pipe);
+    let mut stderr_output = String::new();
+    let mut stderr_buf = [0u8; 4096];
+
+    loop {
+      match stderr_reader.read(&mut stderr_buf) {
+        Ok(0) | Err(_) => break,
+        Ok(n) => {
+          let _ = std::io::stderr().write_all(&stderr_buf[..n]);
+          let _ = std::io::stderr().flush();
+          stderr_output.push_str(&String::from_utf8_lossy(&stderr_buf[..n]));
+        },
+      }
+    }
+
+    stderr_output
+  });
+
+  let exit_status = job
+    .wait()
+    .wrap_err("Failed to wait for command completion")?;
+
+  let stdout_output = stdout_thread
+    .join()
+    .map_err(|_| eyre::eyre!("Stdout thread panicked"))?;
+  let stderr_output = stderr_thread
+    .join()
+    .map_err(|_| eyre::eyre!("Stderr thread panicked"))?;
+
+  Ok((exit_status, stdout_output, stderr_output))
+}
 
 static PASSWORD_CACHE: OnceLock<Mutex<HashMap<String, SecretString>>> =
   OnceLock::new();

@@ -18,7 +18,12 @@ use color_eyre::{
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use nh_core::{
-  command::{ElevationStrategy, cache_password, get_cached_password},
+  command::{
+    ElevationStrategy,
+    cache_password,
+    exec_with_streaming,
+    get_cached_password,
+  },
   installable::Installable,
   util::NixVariant,
 };
@@ -821,16 +826,11 @@ fn copy_closure_to(
 
   debug!(?cmd, "nix-copy-closure --to");
 
-  let capture = cmd
-    .capture()
+  let (exit_status, _stdout, stderr) = exec_with_streaming(cmd)
     .wrap_err("Failed to copy closure to remote host")?;
 
-  if !capture.exit_status.success() {
-    bail!(
-      "nix-copy-closure --to '{}' failed:\n{}",
-      host,
-      capture.stderr_str()
-    );
+  if !exit_status.success() {
+    bail!("nix-copy-closure --to '{}' failed:\n{}", host, stderr);
   }
 
   Ok(())
@@ -974,16 +974,11 @@ fn copy_closure_from(
 
   debug!(?cmd, "nix-copy-closure --from");
 
-  let capture = cmd
-    .capture()
+  let (exit_status, _stdout, stderr) = exec_with_streaming(cmd)
     .wrap_err("Failed to copy closure from remote host")?;
 
-  if !capture.exit_status.success() {
-    bail!(
-      "nix-copy-closure --from '{}' failed:\n{}",
-      host,
-      capture.stderr_str()
-    );
+  if !exit_status.success() {
+    bail!("nix-copy-closure --from '{}' failed:\n{}", host, stderr);
   }
 
   Ok(())
@@ -1056,17 +1051,16 @@ pub fn copy_to_remote(
   spinner.set_message(format!("Copying closure to remote host '{host}'..."));
   spinner.enable_steady_tick(Duration::from_millis(80));
 
-  let capture = cmd
-    .capture()
+  let (exit_status, _stdout, stderr) = exec_with_streaming(cmd)
     .wrap_err("Failed to copy closure to remote host")?;
 
   // We finish and *clear*, because the log line needs to come next. If we try
   // to make the spinner change the text, we cannot reliably match the `info!`
   // or `error!` style.
   spinner.finish_and_clear();
-  if !capture.exit_status.success() {
+  if !exit_status.success() {
     error!("Failed to copy closure to remote host '{host}'");
-    bail!("nix copy --to '{}' failed:\n{}", host, capture.stderr_str());
+    bail!("nix copy --to '{}' failed:\n{}", host, stderr);
   }
   info!("Copied closure to remote host '{host}'");
 
@@ -1099,16 +1093,15 @@ fn copy_closure_between_remotes(
 
   debug!(?cmd, "nix copy between remotes");
 
-  let capture = cmd
-    .capture()
+  let (exit_status, _stdout, stderr) = exec_with_streaming(cmd)
     .wrap_err("Failed to copy closure between remote hosts")?;
 
-  if !capture.exit_status.success() {
+  if !exit_status.success() {
     bail!(
       "nix copy from '{}' to '{}' failed:\n{}",
       from_host,
       to_host,
-      capture.stderr_str()
+      stderr
     );
   }
 
