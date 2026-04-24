@@ -6,13 +6,31 @@
   installShellFiles,
   versionCheckHook,
   sudo,
+  btrfs-progs ? null,
+  bcachefs-tools ? null,
+  stratis-cli ? null,
+  systemd ? null,
   use-nom ? true,
   nix-output-monitor ? null,
   rev ? "dirty",
 }:
 assert use-nom -> nix-output-monitor != null;
 let
-  runtimeDeps = lib.optionals use-nom [ nix-output-monitor ];
+  # `nh os generate-config` shells out to these during hardware scan and
+  # mount introspection: systemd-detect-virt for virtualization detection,
+  # btrfs for subvolume / bind-mount disambiguation, bcachefs for
+  # filesystem UUID resolution, and stratis for pool UUID lookup. They are
+  # only usable on Linux (`nh os` itself is NixOS-only) and several of them
+  # are not buildable on Darwin, so we gate the whole list on the host
+  # platform. The arguments default to `null` so callers on non-Linux
+  # platforms don't need to override anything to evaluate the package.
+  generateConfigDeps = lib.optionals stdenv.hostPlatform.isLinux [
+    btrfs-progs
+    bcachefs-tools
+    stratis-cli
+    systemd
+  ];
+  runtimeDeps = lib.optionals use-nom [ nix-output-monitor ] ++ generateConfigDeps;
   cargoToml = lib.importTOML ./Cargo.toml;
 in
 rustPlatform.buildRustPackage (finalAttrs: {

@@ -94,6 +94,7 @@ impl args::OsArgs {
       OsSubcommand::Info(args) => args.info(),
       OsSubcommand::Rollback(args) => args.rollback(elevation),
       OsSubcommand::BuildImage(args) => args.build_image(&elevation),
+      OsSubcommand::GenerateConfig(args) => args.generate_config(&elevation),
     }
   }
 }

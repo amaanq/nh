@@ -18,6 +18,8 @@ functionality, under the "Removed" section.
 
 ### Changed
 
+- A new `nh os generate-config` subcommand generates NixOS configuration files
+  directly from nh, including filesystem detection and optional flake output.
 - The host used to select the `nixosConfiguration` now defaults to the
   `--target-host` for remote deployments instead of the local hostname, unless
   the hostname is explicitly specified via the `-H|--hostname` flag.

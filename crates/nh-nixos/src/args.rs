@@ -73,6 +73,7 @@ impl OsArgs {
       OsSubcommand::Info(_) | OsSubcommand::Rollback(_) => {
         Box::new(LegacyFeatures)
       },
+      OsSubcommand::GenerateConfig(_) => Box::new(LegacyFeatures),
 
       OsSubcommand::BuildImage(args) => {
         if args.common.uses_flakes() {
@@ -113,6 +114,52 @@ pub enum OsSubcommand {
 
   /// Build a `NixOS` disk-image variant
   BuildImage(OsBuildImageArgs),
+
+  /// Generate NixOS configuration files
+  GenerateConfig(OsGenerateConfigArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct OsGenerateConfigArgs {
+  /// Only print actions, without performing them.
+  ///
+  /// Note: `-n` means `--dry` here (nh convention). Upstream
+  /// `nixos-generate-config` uses `-n` for `--no-filesystems`; use the
+  /// long form if you came from there.
+  #[arg(long, short = 'n')]
+  pub dry: bool,
+
+  /// Overwrite existing configuration files
+  #[arg(long, short)]
+  pub force: bool,
+
+  /// Generate configuration for the NixOS installation mounted at this path
+  #[arg(long)]
+  pub root: Option<PathBuf>,
+
+  /// Directory where generated configuration files are written
+  #[arg(long)]
+  pub dir: Option<PathBuf>,
+
+  /// Print the generated hardware configuration instead of writing it
+  #[arg(long)]
+  pub show_hardware_config: bool,
+
+  /// Do not emit fileSystems or swapDevices options
+  #[arg(long)]
+  pub no_filesystems: bool,
+
+  /// Generate a flake.nix alongside configuration.nix
+  #[arg(long)]
+  pub flake: bool,
+
+  /// Kernel package to use in the generated configuration.nix
+  #[arg(long, value_parser = ["lts", "latest"])]
+  pub kernel: Option<String>,
+
+  /// Do not elevate when running as a non-root user
+  #[arg(short = 'R', long, env = "NH_BYPASS_ROOT_CHECK")]
+  pub bypass_root_check: bool,
 }
 
 #[derive(Debug, Args)]
