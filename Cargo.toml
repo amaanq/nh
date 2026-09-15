@@ -35,7 +35,7 @@ elasticsearch-dsl     = "0.4.24"
 humantime             = "2.3.0"
 indicatif             = "0.18.4"
 inquire               = { default-features = false, features = [ "crossterm" ], version = "0.9.1" }
-jiff                  = { default-features = false, features = [ "std", "tzdb-zoneinfo" ], version = "0.2.35" }
+jiff                  = { default-features = false, features = [ "std", "tzdb-zoneinfo" ], version = "0.2.37" }
 
 nix = { default-features = false, features = [ "fs", "user", "hostname" ], version = "0.31.1" }
 proptest = "1.9.0"
@@ -46,6 +46,7 @@ reqwest = { default-features = false, features = [
   "rustls",
 ], version = "0.13.1" }
 roff = "1.0.0"
+rom = { branch = "refactor", default-features = false, git = "https://github.com/manic-systems/rom" }
 secrecy = { features = [ "serde" ], version = "0.10.3" }
 semver = "1.0.27"
 serde = { features = [ "derive" ], version = "1.0.228" }

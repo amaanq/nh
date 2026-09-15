@@ -10,7 +10,7 @@ use color_eyre::{
 use nh_core::{
   command::{self, Command, CommandKind, NixCommand},
   update::update_with_args,
-  util::{get_hostname, use_nom},
+  util::{get_hostname, use_rom},
 };
 use nh_diff::print_dix_diff;
 use nh_installable::{CommandContext, Installable};
@@ -118,7 +118,7 @@ impl HomeRebuildArgs {
       let config = RemoteBuildConfig {
         build_host,
         target_host: None,
-        use_nom: use_nom(self.common.no_nom),
+        use_rom: use_rom(self.common.no_rom),
         use_substitutes: self.common.passthrough.use_substitutes
           && !self.common.passthrough.network_restricted(),
         execution_args: self
@@ -153,7 +153,7 @@ impl HomeRebuildArgs {
         .extra_args(&self.extra_args)
         .passthrough(&self.common.passthrough)
         .message("Building Home-Manager configuration")
-        .nom(use_nom(self.common.no_nom))
+        .rom(use_rom(self.common.no_rom))
         .run()
         .wrap_err("Failed to build Home-Manager configuration")?;
     }

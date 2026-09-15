@@ -308,24 +308,24 @@ pub fn get_hostname(supplied_hostname: Option<String>) -> Result<String> {
   }
 }
 
-/// Decide whether `nix-output-monitor` (nom) should be used for a build.
+/// Decide whether `rom` should be used for a build.
 ///
-/// `--no-nom` always wins. Otherwise `NH_NOM` forces the choice if set. With
-/// neither, nom is on only when stdout is a terminal. nom's live rendering is
+/// `--no-rom` always wins. Otherwise `NH_ROM` forces the choice if set. With
+/// neither, rom is on only when stdout is a terminal. rom's live rendering is
 /// just noise once stdout is a pipe or file, which is the usual case in CI or
 /// under an agent.
 ///
-/// `NH_NOM` accepts `1`/`true`/`yes`/`on` to force nom on and
+/// `NH_ROM` accepts `1`/`true`/`yes`/`on` to force rom on and
 /// `0`/`false`/`no`/`off` to force it off.
 #[must_use]
-pub fn use_nom(no_nom: bool) -> bool {
+pub fn use_rom(no_rom: bool) -> bool {
   use std::io::IsTerminal;
 
-  if no_nom {
+  if no_rom {
     return false;
   }
 
-  match std::env::var("NH_NOM").ok().as_deref().map(str::trim) {
+  match std::env::var("NH_ROM").ok().as_deref().map(str::trim) {
     Some("1" | "true" | "yes" | "on") => return true,
     Some("0" | "false" | "no" | "off") => return false,
     _ => {},
@@ -568,9 +568,9 @@ mod tests {
   use super::*;
 
   #[test]
-  fn use_nom_respects_explicit_no_nom_flag() {
-    // `--no-nom` must always win, regardless of TTY state or `NH_NOM`.
-    assert!(!use_nom(true));
+  fn use_rom_respects_explicit_no_rom_flag() {
+    // `--no-rom` must always win, regardless of TTY state or `NH_ROM`.
+    assert!(!use_rom(true));
   }
 
   #[test]

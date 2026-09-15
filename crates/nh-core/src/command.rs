@@ -3,7 +3,7 @@ use std::{
   convert::Infallible,
   env,
   ffi::{OsStr, OsString},
-  io::{Read, Write},
+  io::{Read, Write, stdout},
   path::PathBuf,
   str::FromStr,
   sync::{Mutex, OnceLock},
@@ -21,7 +21,7 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 use which::which;
 
-use crate::args::NixBuildPassthroughArgs;
+use crate::{args::NixBuildPassthroughArgs, monitor::run_monitored};
 
 #[must_use]
 pub fn get_sudo_opts() -> Vec<String> {
@@ -971,7 +971,7 @@ pub struct Build {
   message:     Option<String>,
   installable: Installable,
   extra_args:  Vec<OsString>,
-  nom:         bool,
+  rom:         bool,
 }
 
 impl Build {
@@ -981,7 +981,7 @@ impl Build {
       message: None,
       installable,
       extra_args: vec![],
-      nom: false,
+      rom: false,
     }
   }
 
@@ -998,8 +998,8 @@ impl Build {
   }
 
   #[must_use]
-  pub const fn nom(mut self, yes: bool) -> Self {
-    self.nom = yes;
+  pub const fn rom(mut self, yes: bool) -> Self {
+    self.rom = yes;
     self
   }
 
@@ -1038,35 +1038,14 @@ impl Build {
       .args(&self.extra_args)
       .to_exec();
 
-    if self.nom {
-      let pipeline = {
-        base_command
-          .args(["--log-format", "internal-json", "--verbose"])
-          .stderr(Redirection::Merge)
-          .stdout(Redirection::Pipe)
-          | Exec::cmd("nom").args(["--json"])
-      }
-      .stdout(Redirection::None);
-      debug!(?pipeline);
-
-      // Use `popen()` to get access to individual processes so we can check
-      // Nix's exit status, not nom's. The pipeline's `join()` only returns
-      // the exit status of the last command (nom), which always succeeds
-      // even when Nix fails.
-      let job = pipeline.start()?;
-
-      // Wait for all processes to finish
-      for proc in &job.processes {
-        proc.wait()?;
-      }
-
-      // Check the exit status of the FIRST process (nix build)
-      // This is the one that matters. If Nix fails, we should fail as well
-      if let Some(nix_proc) = job.processes.first() {
-        let exit_status = nix_proc.wait()?;
-        if !exit_status.success() {
-          bail!(ExitError(exit_status));
-        }
+    if self.rom {
+      let exit_status = run_monitored(
+        base_command.args(["--log-format", "internal-json", "--verbose"]),
+        stdout(),
+        || false,
+      )?;
+      if !exit_status.success() {
+        bail!(ExitError(exit_status));
       }
     } else {
       let cmd = base_command
@@ -1617,7 +1596,7 @@ mod tests {
     assert!(build.message.is_none());
     assert_eq!(build.installable.to_args(), installable.to_args());
     assert!(build.extra_args.is_empty());
-    assert!(!build.nom);
+    assert!(!build.rom);
   }
 
   #[test]
@@ -1631,7 +1610,7 @@ mod tests {
       .message("Building package")
       .extra_arg("--verbose")
       .extra_args(["--option", "setting", "value"])
-      .nom(true);
+      .rom(true);
 
     assert_eq!(build.message, Some("Building package".to_string()));
     assert_eq!(build.extra_args, vec![
@@ -1640,7 +1619,7 @@ mod tests {
       OsString::from("setting"),
       OsString::from("value")
     ]);
-    assert!(build.nom);
+    assert!(build.rom);
   }
 
   #[test]

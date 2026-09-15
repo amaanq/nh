@@ -25,6 +25,7 @@ use nh_core::{
     get_cached_password,
     get_sudo_opts,
   },
+  monitor::run_monitored,
   util::NixVariant,
 };
 use nh_installable::Installable;
@@ -1506,8 +1507,8 @@ pub struct RemoteBuildConfig {
   /// When set, copies directly from `build_host` to `target_host`.
   pub target_host: Option<RemoteHost>,
 
-  /// Whether to use nix-output-monitor for build output
-  pub use_nom: bool,
+  /// Whether to use rom for build output
+  pub use_rom: bool,
 
   /// Whether to use substitutes when copying closures
   pub use_substitutes: bool,
@@ -1661,15 +1662,9 @@ fn build_on_remote(
   // Build command: nix build <drv>^* --print-out-paths [extra_args...]
   let drv_with_outputs = format!("{}^*", drv_path.display());
 
-  if config.use_nom {
-    // Check that nom is available before attempting to use it
-    which::which("nom")
-      .wrap_err("nom (nix-output-monitor) is required but not found in PATH")?;
-
-    // With nom: pipe through nix-output-monitor
-    build_on_remote_with_nom(host, &drv_with_outputs, config)
+  if config.use_rom {
+    build_on_remote_with_rom(host, &drv_with_outputs, config)
   } else {
-    // Without nom: simple remote execution
     build_on_remote_simple(host, &drv_with_outputs, config)
   }
 }
@@ -1712,7 +1707,7 @@ fn profile_nix_command(
   )
 }
 
-/// Build on remote without nom - just capture output.
+/// Build on remote without rom - just capture output.
 fn build_on_remote_simple(
   host: &RemoteHost,
   drv_with_outputs: &str,
@@ -1805,8 +1800,8 @@ fn build_on_remote_simple(
   Ok(out_path)
 }
 
-/// Build on remote with nom - pipe through nix-output-monitor.
-fn build_on_remote_with_nom(
+/// Build on remote with rom rendering the build logs locally.
+fn build_on_remote_with_rom(
   host: &RemoteHost,
   drv_with_outputs: &str,
   config: &RemoteBuildConfig,
@@ -1816,10 +1811,15 @@ fn build_on_remote_with_nom(
 
   let ssh_opts = get_ssh_opts();
 
-  // Build the remote command with JSON output for nom
+  // Build the remote command with JSON output for rom
   let remote_args = build_nix_command(
     drv_with_outputs,
-    &["--log-format", "internal-json", "--verbose"],
+    &[
+      "--log-format",
+      "internal-json",
+      "--verbose",
+      "--print-out-paths",
+    ],
     &config.execution_args,
   )?;
   let arg_refs: Vec<&str> = remote_args
@@ -1837,99 +1837,30 @@ fn build_on_remote_with_nom(
   for opt in &ssh_opts {
     ssh_cmd = ssh_cmd.arg(opt);
   }
-  ssh_cmd = ssh_cmd
-    .arg(host.ssh_host())
-    .arg(&remote_cmd)
-    .stdout(Redirection::Pipe)
-    .stderr(Redirection::Merge);
+  ssh_cmd = ssh_cmd.arg(host.ssh_host()).arg(&remote_cmd);
 
-  // Pipe through nom
-  let nom_cmd = Exec::cmd("nom").arg("--json");
-  let pipeline = (ssh_cmd | nom_cmd).stdout(Redirection::None);
+  let mut output = Vec::new();
+  let result = run_monitored(ssh_cmd, &mut output, || {
+    get_interrupt_flag().load(Ordering::Relaxed)
+  });
 
-  debug!(?pipeline, "Running remote build with nom");
-
-  // Use popen() to get access to individual processes so we can check
-  // ssh's exit status, not nom's. The pipeline's join() only returns
-  // the exit status of the last command (nom), which always succeeds
-  // even when the remote nix command fails.
-  let job = pipeline.start().wrap_err("Remote build with nom failed")?;
-
-  // Use wait_timeout in a polling loop to check interrupt flag every 100ms
-  let poll_interval = Duration::from_millis(100);
-
-  for proc in &job.processes {
-    #[allow(
-      clippy::needless_continue,
-      reason = "Better for explicitness and consistency"
-    )]
-    loop {
-      // Check interrupt flag before waiting
-      if get_interrupt_flag().load(Ordering::Relaxed) {
-        debug!("Interrupt detected during build with nom");
-        // Kill remaining local processes. This will cause SSH to terminate
-        // the remote command automatically
-        for p in &job.processes {
-          let _ = p.kill();
-          let _ = p.wait(); // reap zombie
-        }
-
-        // Attempt remote cleanup if enabled
-        attempt_remote_cleanup(host, &remote_cmd);
-
-        bail!("Operation interrupted by user");
-      }
-
-      // Poll process with timeout
-      match proc.wait_timeout(poll_interval)? {
-        Some(_) => {
-          // Process has exited, exit status is automatically cached in the
-          // Process handle. Move to next process.
-          break;
-        },
-
-        None => {
-          // Timeout elapsed, process still running - loop continues
-          // and will check interrupt flag again
-          continue;
-        },
-      }
-    }
-  }
-
-  // Check the exit status of the FIRST process (ssh -> nix build)
-  // This is the one that matters. If the remote build fails, we should fail
-  // too
-  if let Some(ssh_proc) = job.processes.first() {
-    let exit_status = ssh_proc.wait()?;
-    if !exit_status.success() {
-      bail!("Remote build failed with exit status: {exit_status:?}");
-    }
-  }
-
-  // nom consumed the output, so we need to query the output path separately
-  // Run nix build again with --print-out-paths (it will be a no-op since
-  // already built)
-  let query_args =
-    build_nix_command(drv_with_outputs, &["--print-out-paths"], &[])?;
-  let query_refs: Vec<&str> =
-    query_args.iter().map(std::string::String::as_str).collect();
-
-  let result = run_remote_command(host, &query_refs, true);
-
-  // Check if interrupted during query
   if get_interrupt_flag().load(Ordering::Relaxed) {
-    debug!("Interrupt detected during output path query");
+    attempt_remote_cleanup(host, &remote_cmd);
     bail!("Operation interrupted by user");
   }
 
-  let result =
-    result?.ok_or_else(|| eyre!("Failed to get output path after build"))?;
+  let exit_status = result.wrap_err("Remote build with rom failed")?;
+  if !exit_status.success() {
+    bail!("Remote build failed with exit status {exit_status:?}");
+  }
 
-  let out_path = result
+  let stdout =
+    String::from_utf8(output).wrap_err("Remote build output is not UTF-8")?;
+  let out_path = stdout
     .lines()
     .next()
-    .ok_or_else(|| eyre!("Output path query returned empty"))?
+    .filter(|line| !line.trim().is_empty())
+    .ok_or_else(|| eyre!("Remote build returned empty output"))?
     .trim()
     .to_string();
 

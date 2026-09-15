@@ -237,11 +237,9 @@ substituters.
 
 ## Build Output
 
-### nix-output-monitor
+### rom
 
-By default, build output is shown directly. While the NH package is wrapped with
-nix-output-monitor, you will need `nix-output-monitor` available on the build
-host if you want NH to be able to use it.
+For interactive builds, NH renders remote Nix logs locally through its embedded
+rom monitor. The build host only needs Nix.
 
-If `nix-output-monitor` creates issues for whatever reason, you may disable it
-with `--no-nom`.
+Disable the monitor with `--no-rom`.
