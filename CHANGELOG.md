@@ -16,6 +16,15 @@ functionality, under the "Removed" section.
 
 ## Unreleased
 
+### Changed
+
+- Build progress now uses the embedded [rom] library for local and remote
+  builds. The controls are `--no-rom` and `NH_ROM`, and the Nix package no
+  longer depends on a monitor executable. Remote builds capture the output path
+  from the build itself instead of running a second command to query it.
+
+[rom]: https://github.com/manic-systems/rom/tree/refactor
+
 ### Added
 
 - `nh os switch`/`nh os boot` now accept `--continue-on-activation-failure`
